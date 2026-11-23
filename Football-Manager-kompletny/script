@@ -1,0 +1,277 @@
+
+const $ = id => document.getElementById(id);
+
+async function api(url, options = {}) {
+    const response = await fetch(url, {
+        headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {})
+        },
+        ...options
+    });
+
+    if (!response.ok) {
+        let message = 'Wystąpił błąd.';
+        try {
+            message = (await response.json()).error || message;
+        } catch {}
+        throw new Error(message);
+    }
+
+    return response.status === 204 ? null : response.json();
+}
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    })[char]);
+}
+
+function notify(message) {
+    alert(message);
+}
+
+function showPage(page) {
+    document.querySelectorAll('.page').forEach(element => {
+        element.classList.toggle('active', element.id === page);
+    });
+
+    document.querySelectorAll('.nav-link').forEach(element => {
+        element.classList.toggle('active', element.dataset.page === page);
+    });
+
+    if (page === 'players') loadPlayers();
+    if (page === 'matches') loadMatches();
+    if (page === 'scorers') loadScorers();
+    if (page === 'dashboard') loadStats();
+}
+
+function openPlayerForm() {
+    $('playerForm').classList.remove('hidden');
+}
+
+function closePlayerForm() {
+    $('playerForm').classList.add('hidden');
+}
+
+function openMatchForm() {
+    $('matchForm').classList.remove('hidden');
+}
+
+function closeMatchForm() {
+    $('matchForm').classList.add('hidden');
+}
+
+// STATYSTYKI DRUŻYNY
+async function loadStats() {
+    try {
+        const stats = await api('/api/stats');
+
+        $('playersCount').textContent = stats.players;
+        $('goalsCount').textContent = stats.goals;
+        $('assistsCount').textContent = stats.assists;
+        $('matchesCount').textContent = stats.matches;
+    } catch (error) {
+        notify(error.message);
+    }
+}
+
+// LISTA ZAWODNIKÓW
+async function loadPlayers() {
+    try {
+        const players = await api('/api/players');
+
+        $('playersTable').innerHTML = players.length
+            ? players.map(player => `
+                <tr>
+                    <td>#${player.number}</td>
+                    <td><strong>${escapeHtml(player.name)}</strong></td>
+                    <td>${escapeHtml(player.position)}</td>
+                    <td>${player.appearances}</td>
+                    <td>${player.goals}</td>
+                    <td>${player.assists}</td>
+                    <td>
+                        <button class="delete"
+                            onclick="deletePlayer(${player.id})">
+                            Usuń
+                        </button>
+                    </td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="7">Brak zawodników. Dodaj pierwszego gracza.</td></tr>';
+
+        loadStats();
+    } catch (error) {
+        notify(error.message);
+    }
+}
+
+// DODAWANIE ZAWODNIKA
+async function addPlayer() {
+    const payload = {
+        name: $('playerName').value.trim(),
+        number: Number($('playerNumber').value),
+        position: $('playerPosition').value,
+        goals: Number($('playerGoals').value),
+        assists: Number($('playerAssists').value),
+        appearances: Number($('playerAppearances').value)
+    };
+
+    try {
+        await api('/api/players', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+
+        $('playerName').value = '';
+        $('playerNumber').value = '';
+        $('playerPosition').value = '';
+        $('playerGoals').value = '0';
+        $('playerAssists').value = '0';
+        $('playerAppearances').value = '0';
+
+        closePlayerForm();
+        await loadPlayers();
+
+        notify('Zawodnik został dodany.');
+    } catch (error) {
+        notify(error.message);
+    }
+}
+
+// USUWANIE ZAWODNIKA
+async function deletePlayer(id) {
+    if (!confirm('Czy na pewno usunąć tego zawodnika?')) return;
+
+    try {
+        await api(`/api/players/${id}`, {
+            method: 'DELETE'
+        });
+
+        await loadPlayers();
+        notify('Zawodnik został usunięty.');
+    } catch (error) {
+        notify(error.message);
+    }
+}
+
+// TERMINARZ MECZÓW
+async function loadMatches() {
+    try {
+        const matches = await api('/api/matches');
+
+        $('matchesList').innerHTML = matches.length
+            ? matches.map(match => `
+                <article class="match">
+                    <h3>
+                        ${escapeHtml(match.opponent)}
+                        <span>${escapeHtml(match.result)}</span>
+                    </h3>
+
+                    <p>
+                        Data:
+                        <strong>${escapeHtml(match.match_date)}</strong>
+                        ${escapeHtml(match.match_time)}
+                    </p>
+
+                    <p>
+                        Miejsce:
+                        <strong>${escapeHtml(match.location || 'Nie podano')}</strong>
+                    </p>
+
+                    <button class="delete"
+                        onclick="deleteMatch(${match.id})">
+                        Usuń mecz
+                    </button>
+                </article>
+            `).join('')
+            : '<p class="muted">Brak spotkań w terminarzu. Dodaj pierwszy mecz.</p>';
+
+        loadStats();
+    } catch (error) {
+        notify(error.message);
+    }
+}
+
+// DODAWANIE MECZU
+async function addMatch() {
+    const payload = {
+        opponent: $('opponent').value.trim(),
+        match_date: $('matchDate').value,
+        match_time: $('matchTime').value,
+        location: $('matchLocation').value.trim(),
+        result: $('matchResult').value.trim() || '-'
+    };
+
+    try {
+        await api('/api/matches', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+
+        ['opponent', 'matchDate', 'matchTime', 'matchLocation']
+            .forEach(id => $(id).value = '');
+
+        $('matchResult').value = '-';
+
+        closeMatchForm();
+        await loadMatches();
+
+        notify('Mecz został dodany.');
+    } catch (error) {
+        notify(error.message);
+    }
+}
+
+// USUWANIE MECZU
+async function deleteMatch(id) {
+    if (!confirm('Czy na pewno usunąć ten mecz?')) return;
+
+    try {
+        await api(`/api/matches/${id}`, {
+            method: 'DELETE'
+        });
+
+        await loadMatches();
+        notify('Mecz został usunięty.');
+    } catch (error) {
+        notify(error.message);
+    }
+}
+
+// KLASYFIKACJA STRZELCÓW
+async function loadScorers() {
+    try {
+        const players = await api('/api/players');
+
+        players.sort((a, b) =>
+            b.goals - a.goals ||
+            a.name.localeCompare(b.name, 'pl')
+        );
+
+        $('scorersTable').innerHTML = players.length
+            ? players.map((player, index) => `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td><strong>${escapeHtml(player.name)}</strong></td>
+                    <td>${escapeHtml(player.position)}</td>
+                    <td>${player.appearances}</td>
+                    <td>${player.assists}</td>
+                    <td><strong>${player.goals}</strong></td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="6">Brak danych do rankingu.</td></tr>';
+    } catch (error) {
+        notify(error.message);
+    }
+}
+
+// URUCHOMIENIE STRONY
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    loadPlayers();
+});
